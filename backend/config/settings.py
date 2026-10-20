@@ -219,8 +219,20 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+# Дополнительные origins из .env (через запятую) — для нового домена/сервера
+CSRF_TRUSTED_ORIGINS += [
+    origin.strip()
+    for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# HTTPS-only настройки: включаются только в проде (DEBUG=False).
+# Редирект на https требует, чтобы nginx передавал X-Forwarded-Proto.
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 # Публичный URL фронта: ссылки в письмах (сброс пароля)
 FRONTEND_URL = (os.getenv('FRONTEND_URL') or ('http://localhost:3000' if DEBUG else '')).rstrip('/')
