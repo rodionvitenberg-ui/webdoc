@@ -16,7 +16,7 @@ AI-интерпретатор медицинских анализов крови
 | Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS 4, next-intl (ru/en/es) |
 | UI-библиотеки | framer-motion, react-three-fiber, recharts, @react-pdf/renderer |
 | Payments | Cryptomus (webhook → выдача PRO) |
-| Деплой | Docker Compose: db + redis + backend (gunicorn) + celery + frontend |
+| Деплой | gunicorn (gthread) + celery + Next.js; PostgreSQL и Redis — системные службы |
 
 ## Структура репозитория (монорепо)
 
@@ -34,8 +34,7 @@ checkups/
 │   ├── lib/             # api.ts (axios), types.ts, store.ts (zustand)
 │   ├── i18n/            # routing.ts, request.ts (next-intl)
 │   └── messages/        # en.json, es.json, ru.json
-├── docker-compose.yml
-└── requirements.txt     # (полный замороженный список зависимостей backend)
+├── requirements.txt     # (полный замороженный список зависимостей backend)
 ```
 
 ## Доменная модель
@@ -67,28 +66,39 @@ upload (PDF/фото)
 ## Запуск (локально)
 
 ### Требования
-- Docker + Docker Compose (для PostgreSQL и Redis)
+- PostgreSQL 17 и Redis — системные пакеты (Docker не используется)
 - Python 3.13+ (проверено на 3.14), Node 22
 
 ### 1. Инфраструктура: PostgreSQL + Redis
 
+Проект поднимает **свой** кластер PostgreSQL на отдельном порту, чтобы не мешать базам других проектов на машине.
+
 ```bash
-docker compose up -d db redis
+PGBIN=/usr/lib/postgresql/17/bin
+DATA=$HOME/.local/share/webdoc-pgdata
+
+$PGBIN/initdb -D $DATA -U postgres --auth-local=trust --auth-host=trust --encoding=UTF8
+$PGBIN/pg_ctl -D $DATA -l /tmp/webdoc-pg.log -o "-p 5434 -k /tmp -c listen_addresses=127.0.0.1" start
+$PGBIN/createdb -h 127.0.0.1 -p 5434 -U postgres checkups
 ```
 
-Порты на хосте (только loopback): PostgreSQL `127.0.0.1:5433`, Redis `127.0.0.1:6380`.
+Redis (только loopback, отдельный порт):
 
-Если Django пишет `connection to server at "127.0.0.1", port 5433 failed: Connection refused` —
-контейнеры не запущены: `docker compose up -d db redis`.
+```bash
+redis-server --port 6381 --daemonize yes --dir /tmp --dbfilename webdoc-redis.rdb --logfile /tmp/webdoc-redis.log
+```
 
-`backend/.env` для запуска из терминала должен смотреть на них:
+`backend/.env` должен смотреть на них:
 
 ```dotenv
 DB_HOST=127.0.0.1
-DB_PORT=5433
-CELERY_BROKER_URL=redis://127.0.0.1:6380/0
-CELERY_RESULT_BACKEND=redis://127.0.0.1:6380/0
+DB_PORT=5434
+CELERY_BROKER_URL=redis://127.0.0.1:6381/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6381/0
 ```
+
+Если Django пишет `connection to server at "127.0.0.1", port 5434 failed` — кластер не запущен:
+`$PGBIN/pg_ctl -D $DATA start`.
 
 ### 2. Backend (терминал)
 
@@ -109,7 +119,7 @@ python manage.py runserver
 
 ```bash
 cd backend && source venv/bin/activate
-celery -A config worker -l INFO
+celery -A config worker -l INFO --concurrency=1
 ```
 
 ### 4. Frontend (отдельный терминал)
@@ -122,17 +132,6 @@ npm run dev
 
 http://localhost:3000 — адрес API берётся из `frontend/.env.local`
 (`NEXT_PUBLIC_API_URL=http://localhost:8000`, файл создаётся вручную).
-
-### Быстрый старт через Docker (всё сразу)
-
-```bash
-docker compose up --build
-```
-
-Сервисы:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000 (Swagger: http://localhost:8000/docs)
-- Admin: http://localhost:8000/admin
 
 ### Заполнить справочник характеристик (Traits)
 
