@@ -7,6 +7,7 @@ export function ProStatusCard() {
     const t = useTranslations('Dashboard.ProStatus');
     const [status, setStatus] = useState<{ is_pro: boolean; pro_expires_at: string | null } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         getPremiumStatus()
@@ -16,6 +17,7 @@ export function ProStatusCard() {
 
     const handleBuy = async () => {
         setIsLoading(true);
+        setError(null);
         try {
             const data = await createPayment();
             if (data.payment_url) {
@@ -25,6 +27,7 @@ export function ProStatusCard() {
             }
         } catch (error) {
             console.error("Payment error:", error);
+            setError(t('paymentError'));
             setIsLoading(false);
         }
     };
@@ -66,6 +69,12 @@ export function ProStatusCard() {
                     </button>
                 )}
             </div>
+
+            {error && (
+                <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                    {error}
+                </p>
+            )}
         </div>
     );
 }

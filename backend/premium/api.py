@@ -1,7 +1,10 @@
 import uuid
 from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal
 import json
+import logging
+
 from .models import Transaction
 from .services import CryptomusService, SUBSCRIPTION_AMOUNT
 from typing import List
@@ -26,6 +29,7 @@ from .services import ChatAssistant
 
 # Создаем роутер. Нам НЕ НУЖЕН здесь объект NinjaAPI
 router = Router(auth=JWTAuth())
+logger = logging.getLogger(__name__)
 # --- ЭНДПОИНТЫ ХАРАКТЕРИСТИК (Traits) ---
 
 @router.get("/traits", response=List[TraitSchema])
@@ -167,6 +171,12 @@ def chat_with_analysis(request, uid: str, payload: ChatRequestSchema):
 @router.post("/payment/create")
 def create_subscription_payment(request):
     user = request.user
+    service = CryptomusService()
+
+    if not service.is_configured:
+        # Провайдер не подключён: 503 и код ошибки вместо 500 с текстом исключения
+        logger.warning("Payment provider is not configured (CRYPTOMUS_* env is empty)")
+        return JsonResponse({"message": "payment_not_configured"}, status=503)
 
     # Переиспользуем активный pending-ордер — повторные клики не плодят дубли
     tx = Transaction.objects.filter(user=user, status='pending').first()
@@ -178,17 +188,19 @@ def create_subscription_payment(request):
         )
 
     try:
-        service = CryptomusService()
         payment_url = service.create_payment(
             order_id=tx.order_id,
             amount=SUBSCRIPTION_AMOUNT,
             email=user.email
         )
-        return {"payment_url": payment_url}
-    except Exception as e:
+    except Exception:
+        # Детали провайдера — в лог, клиенту — только код ошибки
+        logger.exception("Payment creation failed for transaction %s", tx.order_id)
         tx.status = 'fail'
-        tx.save()
-        return JsonResponse({"message": str(e)}, status=500)
+        tx.save(update_fields=['status'])
+        return JsonResponse({"message": "payment_provider_error"}, status=502)
+
+    return {"payment_url": payment_url}
 
 
 # Эндпоинт для Вебхука (auth=None, так как сюда стучится сервер Cryptomus, а не юзер)
@@ -206,28 +218,45 @@ def payment_webhook(request):
         order_id = data.get('order_id')
         status = data.get('status')  # 'paid', 'paid_over', etc.
 
-        if status in ['paid', 'paid_over']:
-            tx = Transaction.objects.get(order_id=order_id)
-            if tx.status != 'paid':
-                tx.status = 'paid'
-                tx.save()
+        tx = Transaction.objects.filter(order_id=order_id).first()
+        if not tx:
+            # Неизвестный заказ: 200, чтобы провайдер не ретраил его бесконечно
+            logger.warning("Webhook for unknown order %s", order_id)
+            return JsonResponse({"status": "ignored"})
 
-                # ВЫДАЕМ PRO НА 30 ДНЕЙ — продлеваем от текущей даты окончания
-                user = tx.user
-                current = user.pro_expires_at or timezone.now()
-                new_expiry = max(current, timezone.now()) + timedelta(days=30)
-                user.pro_expires_at = new_expiry
-                user.save(update_fields=['pro_expires_at'])
-        elif status == 'fail':
+        if status in ('paid', 'paid_over'):
+            if tx.status == 'paid':
+                return JsonResponse({"status": "ok"})  # повторный вебхук — PRO не продлеваем
+
+            # Сумма должна совпадать с заказом, иначе можно оплатить $1 и получить PRO
+            paid_amount = Decimal(str(data.get('amount') or '0'))
+            if paid_amount < tx.amount:
+                logger.warning(
+                    "Order %s: paid %s but required %s", tx.order_id, paid_amount, tx.amount
+                )
+                tx.status = 'fail'
+                tx.save(update_fields=['status'])
+                return JsonResponse({"status": "amount_mismatch"})
+
+            tx.status = 'paid'
+            tx.save(update_fields=['status'])
+
+            # ВЫДАЕМ PRO НА 30 ДНЕЙ — продлеваем от текущей даты окончания
+            user = tx.user
+            current = user.pro_expires_at or timezone.now()
+            new_expiry = max(current, timezone.now()) + timedelta(days=30)
+            user.pro_expires_at = new_expiry
+            user.save(update_fields=['pro_expires_at'])
+        elif status in ('fail', 'cancel', 'system_fail', 'wrong_amount'):
             # Помечаем транзакцию как неуспешную (возврат средств и т.п.)
-            tx = Transaction.objects.get(order_id=order_id)
             if tx.status != 'paid':  # Не трогаем уже оплаченные
                 tx.status = 'fail'
-                tx.save()
+                tx.save(update_fields=['status'])
 
         return JsonResponse({"status": "ok"})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
+    except Exception:
+        logger.exception("Webhook processing failed")
+        return JsonResponse({"error": "webhook_failed"}, status=400)
 
 
 # Статус подписки для фронтенда

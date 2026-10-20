@@ -86,28 +86,46 @@ class ChatAssistant:
 # Стоимость подписки PRO (USD) — единый источник цены
 SUBSCRIPTION_AMOUNT = "10.00"
 
+
+class PaymentNotConfigured(RuntimeError):
+    """Ключи платёжного провайдера не заданы в окружении."""
+
+
+class PaymentProviderError(RuntimeError):
+    """Провайдер ответил ошибкой (ключи есть, но запрос отклонён)."""
+
+
 class CryptomusService:
     API_URL = "https://api.cryptomus.com/v1"
-    
+    REQUEST_TIMEOUT = 20
+
     def __init__(self):
         self.merchant_id = os.environ.get("CRYPTOMUS_MERCHANT_ID")
         self.payment_key = os.environ.get("CRYPTOMUS_API_KEY")
 
-    def _get_signature(self, payload: dict) -> str:
-        # Cryptomus требует md5 от base64(json) + API_KEY
-        json_str = json.dumps(payload, separators=(',', ':'))
-        encoded_payload = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.merchant_id and self.payment_key)
+
+    def _get_signature(self, json_body: str) -> str:
+        """Cryptomus: md5(base64(JSON-тело) + API_KEY).
+
+        Подписывать и отправлять нужно ОДНУ И ТУ ЖЕ строку: пересборка тела
+        через `json=payload` меняет разделители и подпись перестаёт сходиться.
+        """
+        encoded_payload = base64.b64encode(json_body.encode('utf-8')).decode('utf-8')
         return hashlib.md5(f"{encoded_payload}{self.payment_key}".encode('utf-8')).hexdigest()
 
     def create_payment(self, order_id: str, amount: str, email: str) -> str:
         """
         Создает платеж и возвращает URL для редиректа юзера.
 
-        url_return — куда попадает юзер после оплаты (фронтенд).
-        url_callback — куда Cryptomus шлёт webhook (API бэкенда).
-        API смонтирован в корне (config/urls.py => path('', api.urls)),
-        поэтому callback путь БЕЗ префикса /api.
+        url_return/url_success — куда попадает юзер после оплаты (фронтенд).
+        url_callback — куда Cryptomus шлёт webhook (API бэкенда, путь без /api).
         """
+        if not self.is_configured:
+            raise PaymentNotConfigured("CRYPTOMUS_MERCHANT_ID / CRYPTOMUS_API_KEY не заданы")
+
         site_url = os.environ.get("SITE_URL", "https://webdoc.life").rstrip("/")
         backend_url = os.environ.get("BACKEND_URL", "https://api.webdoc.life").rstrip("/")
         payload = {
@@ -115,22 +133,27 @@ class CryptomusService:
             "currency": "USD",
             "order_id": str(order_id),
             "email": email,
-            "url_return": f"{site_url}/dashboard",  # Куда вернуть юзера после оплаты
-            "url_callback": f"{backend_url}/premium/payment/webhook",  # Куда придет Webhook
+            "url_return": f"{site_url}/dashboard",
+            "url_success": f"{site_url}/dashboard",
+            "url_callback": f"{backend_url}/premium/payment/webhook",
         }
-        
-        headers = {
-            "merchant": self.merchant_id,
-            "sign": self._get_signature(payload),
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(f"{self.API_URL}/payment", json=payload, headers=headers)
+        json_body = json.dumps(payload, separators=(',', ':'))
+
+        response = requests.post(
+            f"{self.API_URL}/payment",
+            data=json_body,
+            headers={
+                "merchant": self.merchant_id,
+                "sign": self._get_signature(json_body),
+                "Content-Type": "application/json",
+            },
+            timeout=self.REQUEST_TIMEOUT,
+        )
         data = response.json()
-        
+
         if data.get("state") == 0:
-            return data["result"]["url"] # Возвращаем ссылку на оплату
-        raise Exception(f"Cryptomus error: {data}")
+            return data["result"]["url"]
+        raise PaymentProviderError(data.get("message") or f"HTTP {response.status_code}")
 
     def verify_webhook(self, raw_body: bytes, sign: str | None = None) -> bool:
         """Проверяет подлинность вебхука по СЫРОМУ телу запроса (требование Cryptomus).
@@ -139,7 +162,7 @@ class CryptomusService:
         Парсить тело и пересобирать JSON нельзя — порядок ключей/экранирование
         не обязаны совпадать с исходным запросом.
         """
-        if not sign:
+        if not sign or not self.payment_key:
             return False
 
         encoded = base64.b64encode(raw_body).decode('utf-8')

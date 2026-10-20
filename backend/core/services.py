@@ -6,7 +6,7 @@ from datetime import datetime
 import datetime as dt
 
 # Дневные лимиты на запуск анализа (в т.ч. пересчёты)
-FREE_DAILY_LIMIT = 2
+FREE_DAILY_LIMIT = 5
 PRO_DAILY_LIMIT = 10
 
 

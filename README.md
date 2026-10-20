@@ -155,7 +155,9 @@ python populated_traits.py
 | `AI_API_KEY`, `AI_API_KEY_2`, ... | ключи LLM (DeepSeek). Мультиключ: используются все с префиксом `AI_API_KEY`. |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` | SMTP. Порт 465 → SSL, 587 → STARTTLS |
 | `FRONTEND_URL` | публичный URL фронта для ссылок в письмах (обязателен в проде) |
-| `CRYPTOMUS_MERCHANT_ID`, `CRYPTOMUS_API_KEY` | оплата PRO |
+| `CRYPTOMUS_MERCHANT_ID`, `CRYPTOMUS_API_KEY` | оплата PRO. Пусто → `POST /premium/payment/create` отдаёт `503 payment_not_configured` |
+| `SITE_URL` | куда вернуть пользователя после оплаты (дефолт `https://webdoc.life`) |
+| `BACKEND_URL` | публичный адрес API для webhook Cryptomus (`/premium/payment/webhook`) |
 | `NEXT_PUBLIC_API_URL` (frontend) | базовый URL backend API |
 
 ## Тесты

@@ -193,7 +193,8 @@ class DailyLimitTests(TestCase):
             email="limit@example.com", password="testpass123"
         )
 
-    def test_free_limit_2_pro_10(self):
+    def test_free_limit_5_pro_10(self):
+        self.assertEqual(FREE_DAILY_LIMIT, 5)
         self.assertEqual(get_daily_analysis_limit(self.user), FREE_DAILY_LIMIT)
         self.user.pro_expires_at = timezone.now() + timedelta(days=30)
         self.user.save()

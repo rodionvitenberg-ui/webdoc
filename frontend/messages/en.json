@@ -287,7 +287,8 @@
       "inactiveTitle": "Upgrade to PRO",
       "activeUntil": "Active until {date}",
       "inactiveDesc": "Unlock unlimited AI access and advanced analytics",
-      "upgradeBtn": "Upgrade to PRO"
+      "upgradeBtn": "Upgrade to PRO",
+      "paymentError": "Payment is currently unavailable. Try again later or contact support."
     }
   },
   "Analysis": {
