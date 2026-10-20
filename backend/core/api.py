@@ -302,6 +302,9 @@ def change_password(request, payload: ChangePasswordSchema):
 # 2. РАБОТА С АНАЛИЗАМИ (Гибридный доступ)
 # ==========================================
 
+# Лимит загрузки: всё, что больше, дорожает в токенах и ретраях, а не в качестве ответа.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
 @api.post("/analyses/upload", response=AnalysisResponseSchema, auth=OptionalJWTAuth())
 def upload_analysis(
     request, 
@@ -315,6 +318,13 @@ def upload_analysis(
     # Единый механизм: OptionalJWTAuth авторизует владельца или пропускает гостя
     user = request.user if getattr(request.user, 'is_authenticated', False) else None
     patient_profile = None
+
+    if file.size > MAX_UPLOAD_BYTES:
+        return api.create_response(
+            request,
+            {"message": "file_too_large", "limit": MAX_UPLOAD_BYTES},
+            status=413
+        )
 
     if user:
         limit = get_daily_analysis_limit(user)

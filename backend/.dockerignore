@@ -1,0 +1,9 @@
+# Всё, что не нужно внутри образа: без этого venv (2.4 ГБ) уезжает в build context
+venv/
+media/
+staticfiles/
+__pycache__/
+*.py[cod]
+db.sqlite3
+*.log
+.git/

@@ -1,15 +1,18 @@
 # WebDoc.life (Checkups)
 
-AI-интерпретатор медицинских анализов крови. Пользователь загружает бланк анализа (PDF/фото), система распознаёт текст (OCR), анонимизирует персональные данные, прогоняет через LLM-пайплайн и выдаёт структурированную расшифровку: показатели, отклонения, возможные причины и рекомендации. Дополнительно есть ИИ-чат по каждому анализу, динамика показателей (графики), профили пациентов и PRO-подписка.
+AI-интерпретатор медицинских анализов крови. Пользователь загружает бланк анализа (PDF/фото), система отдаёт изображение бланка vision-модели, которая сама распознаёт текст, и возвращает структурированную расшифровку: показатели, отклонения, возможные причины и рекомендации. Дополнительно есть ИИ-чат по каждому анализу, динамика показателей (графики), профили пациентов и PRO-подписка.
+
+> Ветка `lite-vision` — демонстрационная сборка под слабый сервер: OCR на своей стороне
+> (Tesseract) и анонимизация (Presidio) удалены, бланк уходит в LLM как есть.
+> Проект не предназначен для приёма реальных медицинских документов.
 
 ## Стек
 
 | Слой | Технологии |
 |------|-----------|
 | Backend | Django 6, django-ninja (API), django-ninja-jwt, Celery, PostgreSQL, Redis |
-| OCR / обработка | PyMuPDF, pdf2image, pytesseract, Pillow |
-| Анонимизация | Microsoft Presidio (spaCy-модели en/ru/es) |
-| LLM | DeepSeek через OpenAI SDK (мультиключ + fallback) |
+| OCR / обработка | PyMuPDF (PDF → JPEG; poppler и Pillow не нужны) |
+| LLM | DeepSeek (`deepseek-flash`, vision) через OpenAI SDK (мультиключ + fallback) |
 | Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS 4, next-intl (ru/en/es) |
 | UI-библиотеки | framer-motion, react-three-fiber, recharts, @react-pdf/renderer |
 | Payments | Cryptomus (webhook → выдача PRO) |
@@ -53,11 +56,10 @@ checkups/
 
 ```
 upload (PDF/фото)
-  → OCR (векторный PDF читается напрямую, скан — tesseract rus+eng)
-  → анонимизация Presidio (PERSON, EMAIL, PHONE, LOCATION... — даты НЕ вырезаются)
+  → PDF → JPEG через PyMuPDF (до 5 страниц), картинки уходят как есть
   → сборка контекста пациента (пол, возраст, ИМТ, история показателей за 180 дней, premium-черты)
-  → Stage 1: "extractor" — извлекает сырые показатели/даты (JSON)
-  → Stage 2: "interpreter" — выдаёт reasoning + summary + indicators + causes + recommendations (JSON)
+  → Stage 1: "extractor" — vision-модель читает изображения и извлекает сырые показатели/даты (JSON)
+  → Stage 2: "interpreter" — по извлечённому JSON выдаёт reasoning + summary + indicators + causes + recommendations (JSON)
   → сохранение ai_result + атомарных показателей
   → SSE-стрим статуса для фронтенда
 ```
@@ -66,7 +68,7 @@ upload (PDF/фото)
 
 ### Требования
 - Docker + Docker Compose (для PostgreSQL и Redis)
-- Python 3.13+ (проверено на 3.14), Node 22, Tesseract OCR (`tesseract-ocr-rus` / `eng`)
+- Python 3.13+ (проверено на 3.14), Node 22
 
 ### 1. Инфраструктура: PostgreSQL + Redis
 

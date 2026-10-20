@@ -50,7 +50,7 @@
     "items": [
       {
         "question": "¿Cómo funciona la interpretación de los análisis?",
-        "answer": "Extraemos datos numéricos de su archivo PDF o foto utilizando tecnología de reconocimiento óptico de caracteres (OCR), los anonimizamos y los pasamos a una IA médica. El sistema compara los datos con los valores de referencia generalmente aceptados y ayuda a estructurar la información."
+        "answer": "Enviamos la imagen de su archivo PDF o foto a un modelo de visión que lee los valores por sí mismo y luego pasamos el resultado a una IA médica. El sistema compara los datos con los valores de referencia generalmente aceptados y ayuda a estructurar la información."
       },
       {
         "question": "¿Es seguro? ¿Almacenan mis datos?",
@@ -451,7 +451,7 @@
 },
 "Consent": {
   "title": "Su privacidad es importante",
-  "description": "Utilizamos cookies para sesiones y mejora del servicio. Nuestro sistema anonimiza localmente sus datos antes de cualquier análisis de IA. Más información en nuestra",
+  "description": "Utilizamos cookies para sesiones y mejora del servicio. El documento se envía a la IA sin anonimización local. Más información en nuestra",
   "privacyLink": "Política de privacidad",
   "accept": "Aceptar todo",
   "decline": "Rechazar"
@@ -468,9 +468,9 @@
 },
 "About": {
     "title": "Sobre la tecnología de webdoc.life",
-    "description": "Este proyecto fue creado como una demostración de las capacidades actuales de la IA en la medicina. Utilizamos un sistema híbrido de OCR y modelos LLM para transformar formularios de análisis complejos en informes comprensibles.",
-    "techTitle": "La seguridad es lo primero",
-    "techDescription": "No nos limitamos a enviar sus datos a una red neuronal. Primero, nuestro servidor elimina localmente todos los datos personales (nombre completo, contactos) mediante algoritmos de anonimización NLP. La IA solo ve las cifras y los indicadores.",
+    "description": "Este proyecto fue creado como una demostración de las capacidades actuales de la IA en la medicina. Entregamos la imagen del formulario a un modelo de visión para transformar análisis complejos en informes comprensibles.",
+    "techTitle": "Cómo funciona",
+    "techDescription": "El formulario se envía a un modelo de visión como imagen y lo procesa un proveedor externo de IA. En esta demo no hay anonimización local: el modelo ve todo lo impreso en el formulario.",
     "supportText": "Este proyecto es desarrollado por un único desarrollador. Si el servicio le ha sido de ayuda, puede apoyar su crecimiento.",
     "supportButton": "Apoyar el proyecto"
   },

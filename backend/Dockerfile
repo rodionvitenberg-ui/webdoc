@@ -1,20 +1,8 @@
 # backend/Dockerfile
 FROM python:3.13-slim
 
-# Устанавливаем системные зависимости
-# libpq-dev нужен для psycopg (PostgreSQL)
-# tesseract-ocr и языки нужны для pytesseract
-# libgl1-mesa-glx часто нужен для корректной работы библиотек обработки изображений
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-rus \
-    tesseract-ocr-eng \
-    tesseract-ocr-spa \
-    poppler-utils \
-    libgl1 \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Системные пакеты не нужны: psycopg ставится как psycopg-binary (libpq внутри колеса),
+# PyMuPDF — готовое колесо. Tesseract/poppler/libgl удалены вместе с OCR-пайплайном.
 
 WORKDIR /app
 
@@ -34,5 +22,6 @@ RUN python manage.py collectstatic --noinput
 # Открываем порт
 EXPOSE 8000
 
-# Запускаем Gunicorn (3 воркера — оптимально для большинства VPS)
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "config.wsgi:application"]
+# Запускаем Gunicorn: gthread — чтобы SSE-стрим статуса не блокировал sync-воркер
+# (поток живёт до 180с, поэтому таймаут выше него).
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--worker-class", "gthread", "--workers", "2", "--threads", "4", "--timeout", "200", "config.wsgi:application"]

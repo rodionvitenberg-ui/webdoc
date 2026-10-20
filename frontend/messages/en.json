@@ -50,7 +50,7 @@
     "items": [
       {
         "question": "How does the test interpretation work?",
-        "answer": "We extract numerical data from your PDF file or photo using optical character recognition (OCR) technology, anonymize it, and pass it to a medical AI. The system compares the data with generally accepted reference values and helps structure the information."
+        "answer": "We send the image of your PDF file or photo to a vision model that reads the values itself, then pass the result to a medical AI. The system compares the data with generally accepted reference values and helps structure the information."
       },
       {
         "question": "Is it safe? Do you store my data?",
@@ -449,7 +449,7 @@
 },
 "Consent": {
   "title": "Your Privacy Matters",
-  "description": "We use cookies for sessions and service improvement. Our system locally anonymizes your data before any AI analysis. Learn more in our",
+  "description": "We use cookies for sessions and service improvement. The document is sent to the AI without local anonymization. Learn more in our",
   "privacyLink": "Privacy Policy",
   "accept": "Accept All",
   "decline": "Decline"
@@ -466,9 +466,9 @@
 },
 "About": {
     "title": "About webdoc.life Technology",
-    "description": "This project was created as a demonstration of modern AI capabilities in medicine. We use a hybrid system of OCR and LLM models to transform complex laboratory forms into clear, understandable reports.",
-    "techTitle": "Security First",
-    "techDescription": "We don't just send your data to an AI. First, our server locally strips all personal information (Full Name, contact details) using NLP anonymization algorithms. The AI only sees the numbers and indicators.",
+    "description": "This project was created as a demonstration of modern AI capabilities in medicine. We hand the report image to a vision model to turn complex laboratory forms into clear, understandable reports.",
+    "techTitle": "How It Works",
+    "techDescription": "The report is sent to a vision model as an image and processed by an external AI provider. There is no local anonymization in this demo: the model sees everything printed on the form.",
     "supportText": "This project is developed by a solo developer. If this service has helped you, you can support its growth.",
     "supportButton": "Support the Project"
   },

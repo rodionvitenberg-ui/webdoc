@@ -36,10 +36,23 @@ class LLMClient:
         return True
 
     def complete(self, sys_prompt: str, user_prompt: str, require_json: bool = False,
-                 temperature: float = 0.1, max_attempts: int | None = None) -> str | dict:
-        """Синхронный вызов без стрима. Возвращает текст или dict (require_json=True)."""
+                 temperature: float = 0.1, max_attempts: int | None = None,
+                 images: list[str] | None = None) -> str | dict:
+        """
+        Синхронный вызов без стрима. Возвращает текст или dict (require_json=True).
+
+        images — data-URL картинок; уходят в user-сообщение (в system/assistant
+        vision-модель их не принимает).
+        """
         if not self._keys:
             raise RuntimeError("AI_API_KEY не найдены в окружении")
+
+        user_content: str | list[dict] = user_prompt
+        if images:
+            user_content = [{"type": "text", "text": user_prompt}] + [
+                {"type": "image_url", "image_url": {"url": url, "detail": "high"}}
+                for url in images
+            ]
 
         max_attempts = max_attempts or len(self._keys) * 2
         for attempt in range(max_attempts):
@@ -48,7 +61,7 @@ class LLMClient:
                     "model": self.model_name,
                     "messages": [
                         {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": user_prompt},
+                        {"role": "user", "content": user_content},
                     ],
                     "temperature": temperature,
                 }

@@ -34,7 +34,8 @@ services:
     build: 
       context: ./backend
       dockerfile: Dockerfile
-    command: sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --workers 3 config.wsgi:application"
+    # gthread: SSE-стрим статуса (до 180с) не должен занимать sync-воркер целиком
+    command: sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --worker-class gthread --workers 2 --threads 4 --timeout 200 config.wsgi:application"
     volumes:
       # Пробрасываем медиа-файлы, если локально (пока не перешли на R2 полностью)
       - backend_media:/app/media
@@ -60,7 +61,9 @@ services:
     build: 
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config worker -l INFO
+    # concurrency=1: prefork по умолчанию = числу ядер, а каждый процесс = копия Django;
+    # max-tasks-per-child возвращает память, которая течёт за время жизни воркера.
+    command: celery -A config worker -l INFO --concurrency=1 --max-tasks-per-child=50
     volumes:
       - backend_media:/app/media
     environment:

@@ -1,12 +1,17 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import fitz
 from django.test import TestCase
 
+from analysis.document_processor import MAX_PAGES, document_to_images
 from analysis.models import PromptTemplate
 from analysis.prompts import DEFAULT_PROMPTS, MIN_PROMPT_LENGTH
 from analysis.services import AnalysisPipeline, normalize_ai_result
-from core.llm import json_loads
+from core.llm import LLMClient, json_loads
+
+# Содержимое картинки тестам не нужно: LLM замокан, важен только факт передачи.
+IMAGE_DATA_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
 
 
 def assert_no_nulls(test_case, value, path="result"):
@@ -168,7 +173,7 @@ class PipelineResultTests(TestCase):
             },
         ]
 
-        result = AnalysisPipeline(language_code="ru").run_pipeline("Гемоглобин 140 g/L")
+        result = AnalysisPipeline(language_code="ru").run_pipeline([IMAGE_DATA_URL])
 
         assert_no_nulls(self, result)
         self.assertEqual(result["indicators"][0]["name"], "Гемоглобин")
@@ -181,7 +186,7 @@ class PipelineResultTests(TestCase):
         mock_complete.return_value = {"patient_info": {}, "indicators": []}
 
         with self.assertRaises(ValueError):
-            AnalysisPipeline(language_code="ru").run_pipeline("нечитаемый текст")
+            AnalysisPipeline(language_code="ru").run_pipeline([IMAGE_DATA_URL])
 
 
 class JsonParsingTests(TestCase):
@@ -191,3 +196,65 @@ class JsonParsingTests(TestCase):
     def test_rejects_non_object_root(self):
         with self.assertRaises(ValueError):
             json_loads("null")
+
+
+class DocumentToImagesTests(TestCase):
+    @staticmethod
+    def _pdf_bytes(pages):
+        doc = fitz.open()
+        for _ in range(pages):
+            doc.new_page().insert_text((72, 72), "Hemoglobin 140 g/L")
+        try:
+            return doc.tobytes()
+        finally:
+            doc.close()
+
+    def test_pdf_pages_become_jpeg_data_urls(self):
+        images = document_to_images(self._pdf_bytes(2), "analyses/report.pdf")
+
+        self.assertEqual(len(images), 2)
+        for url in images:
+            self.assertTrue(url.startswith("data:image/jpeg;base64,"))
+            # Рендер страницы не может быть короче пустого заголовка data-URL
+            self.assertGreater(len(url), 1000)
+
+    def test_image_is_passed_through(self):
+        images = document_to_images(b"\xff\xd8\xff\xe0jpeg-bytes", "analyses/photo.JPG")
+
+        self.assertEqual(len(images), 1)
+        self.assertTrue(images[0].startswith("data:image/jpeg;base64,"))
+
+    def test_pdf_over_page_limit_raises(self):
+        with self.assertRaises(ValueError):
+            document_to_images(self._pdf_bytes(MAX_PAGES + 1), "analyses/big.pdf")
+
+
+class LLMImagePayloadTests(TestCase):
+    """Vision-картинки должны уходить в user-сообщение, текст — оставаться строкой."""
+
+    def _call(self, images=None):
+        client = LLMClient()
+        client._keys = ["test-key"]
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
+        )
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=MagicMock(return_value=response)))
+        )
+        with patch.object(LLMClient, "_get_client", return_value=fake_client):
+            client.complete("sys", "user text", require_json=True, images=images)
+
+        kwargs = fake_client.chat.completions.create.call_args.kwargs
+        return kwargs["messages"]
+
+    def test_images_are_attached_to_user_message(self):
+        messages = self._call(images=[IMAGE_DATA_URL])
+
+        self.assertEqual(messages[0], {"role": "system", "content": "sys"})
+        self.assertEqual(messages[1]["content"][0], {"type": "text", "text": "user text"})
+        self.assertEqual(messages[1]["content"][1]["image_url"]["url"], IMAGE_DATA_URL)
+
+    def test_without_images_user_message_stays_text(self):
+        messages = self._call()
+
+        self.assertEqual(messages[1], {"role": "user", "content": "user text"})

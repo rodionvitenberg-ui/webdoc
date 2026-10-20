@@ -169,7 +169,8 @@ def normalize_ai_result(data, language_code: str = "ru") -> dict:
 
 class AnalysisPipeline:
     def __init__(self, language_code='ru'):
-        self.llm = LLMClient(base_url="https://api.deepseek.com", model_name="deepseek-chat")
+        # deepseek-flash — vision-модель: принимает изображения бланка напрямую
+        self.llm = LLMClient(base_url="https://api.deepseek.com", model_name="deepseek-flash")
         self.language_code = language_code
 
     def _get_prompt(self, role: str) -> str:
@@ -190,12 +191,12 @@ class AnalysisPipeline:
             prompt_text += f"\n\n{default['context_data']}"
         return prompt_text
 
-    def run_pipeline(self, safe_text: str, patient_context: str = None) -> dict:
-        if not (safe_text or "").strip():
-            raise ValueError("❌ Пустой текст документа: интерпретация невозможна")
+    def run_pipeline(self, images: list[str], patient_context: str = None) -> dict:
+        if not images:
+            raise ValueError("❌ Документ не дал ни одного изображения: интерпретация невозможна")
 
-        print(f"--- Stage 1: Секретарь (Extraction) [{self.llm.model_name}, Lang: {self.language_code}] ---")
-        raw_data = self._step_extract(safe_text)
+        print(f"--- Stage 1: Секретарь (Extraction) [{self.llm.model_name}, Lang: {self.language_code}, изображений: {len(images)}] ---")
+        raw_data = self._step_extract(images)
 
         # --- УМНОЕ ОБОГАЩЕНИЕ КОНТЕКСТА ДЕМОГРАФИЕЙ ИЗ БЛАНКА ---
         patient_info = raw_data.get('patient_info', {})
@@ -243,7 +244,7 @@ class AnalysisPipeline:
 
         return interpreted_data
 
-    def _step_extract(self, safe_text: str):
+    def _step_extract(self, images: list[str]):
         sys_prompt = self._get_prompt(PromptTemplate.Role.EXTRACTOR)
         
         # --- ЖЕСТКИЕ ПРАВИЛА ДЛЯ ЭКСТРАКТОРА ---
@@ -254,13 +255,14 @@ class AnalysisPipeline:
 CRITICAL NULL INSTRUCTION: Never return null anywhere. Use "" for unknown text, "UNKNOWN" for unknown gender and [] for an empty indicators array.
 """
         
-        full_prompt = f"ОБЕЗЛИЧЕННЫЙ ТЕКСТ АНАЛИЗА:\n{safe_text}"
+        full_prompt = "ИЗОБРАЖЕНИЯ БЛАНКА АНАЛИЗА — распознай текст сам и извлеки данные строго по структуре."
         
         result = self.llm.complete(
             sys_prompt=sys_prompt,
             user_prompt=full_prompt,
             require_json=True,
-            temperature=0.1
+            temperature=0.1,
+            images=images,
         )
         return normalize_extraction(result)
 

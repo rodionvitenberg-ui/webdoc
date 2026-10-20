@@ -4,7 +4,6 @@ from django.utils import timezone
 from django.utils import translation
 from .models import MedicalAnalysis, AnalysisIndicator, PatientProfile
 from analysis.services import AnalysisPipeline
-from analysis.document_processor import process_document
 from core.services import save_atomic_indicators
 
 # ----------------------------------------------
@@ -25,7 +24,7 @@ def trigger_next_analysis(analysis, language_code='en'):
             # Обязательно прокидываем язык дальше!
             process_analysis_task.delay(next_pending.uid, language_code)
 
-# (OCR + анонимизация вынесены в analysis.document_processor)
+# (файл → изображения вынесено в analysis.document_processor)
 
 @shared_task(bind=True, max_retries=5)
 def process_analysis_task(self, analysis_id, language_code='en'): 
@@ -42,18 +41,26 @@ def process_analysis_task(self, analysis_id, language_code='en'):
             analysis.status = MedicalAnalysis.Status.PROCESSING
             analysis.save(update_fields=['status'])
         
-        # --- ШАГ 1+2: OCR + анонимизация (единый модуль) ---
+        # --- ШАГ 1: файл → изображения для vision-модели ---
+        # Импорт внутри таски: fitz нужен только celery-воркеру, не gunicorn.
+        from analysis.document_processor import document_to_images
+
         analysis.file.open('rb')
         try:
             file_data = analysis.file.read()
         finally:
             analysis.file.close()
-        safe_text = process_document(file_data, analysis.file.name)
 
-        if not safe_text.strip():
-            print("❌ Не удалось извлечь текст из документа.")
+        try:
+            images = document_to_images(file_data, analysis.file.name)
+            if not images:
+                raise ValueError("документ не дал ни одного изображения")
+        except ValueError as exc:
+            # Постоянная ошибка файла (битый/слишком много страниц) — ретраи не помогут
+            print(f"❌ {exc}")
             analysis.status = MedicalAnalysis.Status.FAILED
             analysis.save(update_fields=['status'])
+            trigger_next_analysis(analysis, language_code)
             return False
         
         # --- ШАГ 3: Сборка контекста прогрессии и профиля ---
@@ -122,9 +129,9 @@ def process_analysis_task(self, analysis_id, language_code='en'):
                         history_str += f"- {name}: {val}\n"
                     patient_context += history_str
 
-        # --- ШАГ 4: Запуск пайплайна (передаем ТЕКСТ) ---
+        # --- ШАГ 4: Запуск пайплайна (передаем ИЗОБРАЖЕНИЯ) ---
         pipeline = AnalysisPipeline(language_code=language_code)
-        result = pipeline.run_pipeline(safe_text, patient_context)
+        result = pipeline.run_pipeline(images, patient_context)
         
         if result:
             analysis.refresh_from_db()
