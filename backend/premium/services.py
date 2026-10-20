@@ -6,6 +6,7 @@ import requests
 
 from core.llm import LLMClient
 from analysis.models import PromptTemplate
+from analysis.prompts import DEFAULT_PROMPTS, MIN_PROMPT_LENGTH
 from .models import ChatSettings
 
 class ChatAssistant:
@@ -14,26 +15,38 @@ class ChatAssistant:
         self.language_code = language_code
 
     def _get_prompt(self) -> str:
-        try:
-            # Используем роль из приложения analysis
-            template = PromptTemplate.objects.get(role='chat_assistant', is_active=True)
-            return template.system_prompt
-        except PromptTemplate.DoesNotExist:
-            return "You are a helpful medical assistant."
+        # Используем роль из приложения analysis
+        template = PromptTemplate.objects.filter(role='chat_assistant', is_active=True).first()
+        if template:
+            prompt_text = (template.system_prompt or "").strip()
+            # Заглушка вроде "Говори." не задаёт контракт — берём default.
+            if len(prompt_text) >= MIN_PROMPT_LENGTH:
+                if template.context_data:
+                    prompt_text += f"\n\n{template.context_data}"
+                return prompt_text
+
+        default = DEFAULT_PROMPTS['chat_assistant']
+        prompt_text = default["system_prompt"]
+        if default.get("context_data"):
+            prompt_text += f"\n\n{default['context_data']}"
+        return prompt_text
         
     def _minify_analysis(self, full_data: dict) -> dict:
         """
         Удаляет всю текстовую 'воду' (причины, рекомендации, выводы), 
         оставляя только голые цифры и статусы для экономии токенов.
         """
+        summary = full_data.get("summary") or {}
         minified = {
             "summary": {
-                "is_critical": full_data.get("summary", {}).get("is_critical", False)
+                "is_critical": summary.get("is_critical", False)
             },
             "indicators": []
         }
         
-        for ind in full_data.get("indicators", []):
+        for ind in (full_data.get("indicators") or []):
+            if not isinstance(ind, dict):
+                continue
             minified["indicators"].append({
                 "name": ind.get("name"),
                 "value": ind.get("value"),
@@ -55,7 +68,11 @@ class ChatAssistant:
             payload_data = analysis_data # Кидаем огромный JSON как есть
 
         # Используем общий LLMClient — пул ключей и ротация внутри
-        sys_prompt = self._get_prompt()
+        language_instruction = (
+            f"\n\nCRITICAL LANGUAGE INSTRUCTION: Answer ONLY in the language with ISO code "
+            f"'{self.language_code}' and never switch languages."
+        )
+        sys_prompt = f"{self._get_prompt()}{language_instruction}"
         context_block = f"ДАННЫЕ ПАЦИЕНТА:\n{patient_context}\n\nАНАЛИЗ (JSON):\n{json.dumps(payload_data, ensure_ascii=False)}"
 
         messages = []

@@ -42,8 +42,6 @@ class User(AbstractUser):
         return self.email
     
 class PatientProfile(models.Model):
-    # ИЗМЕНЕНИЕ: null=True, blank=True для поддержки гостевого входа
-    # Сохраняем CASCADE и related_name для корректной работы ЛК
     user = models.ForeignKey(
         User, 
         on_delete=models.CASCADE, 

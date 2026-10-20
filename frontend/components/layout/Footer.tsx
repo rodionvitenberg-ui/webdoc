@@ -9,7 +9,7 @@ export function Footer() {
   return (
     <footer className="w-full backdrop-blur-md mt-auto border-t border-accent/10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-        <div className="flex flex-col md:flex-row justify-between items-center md:items-center gap-8">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-8">
           
           {/* Левая часть: Логотип и копирайт */}
           <div className="flex flex-col items-center md:items-start gap-4">
@@ -46,19 +46,6 @@ export function Footer() {
                 {t('disclaimer')}
               </Link>
             </div>
-          </div>
-
-          {/* Powered by */}
-          <div className="pt-6 mt-8 border-t border-accent/10 text-center text-sm text-accent/60">
-            <a 
-              href="https://soshallitbe.cyou" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="hover:text-accent transition-colors"
-            >
-              As you dream, soshallitbe.cyou
-            </a>{' '}
-            &copy; 2026
           </div>
 
         </div>

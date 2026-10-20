@@ -9,6 +9,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Наружу — только на loopback: локальный `runserver` ходит на 127.0.0.1:5433.
+    ports:
+      - "127.0.0.1:5433:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-checkups}"]
@@ -19,6 +22,9 @@ services:
   # --- Redis (Брокер сообщений для Celery и кэш) ---
   redis:
     image: redis:7-alpine
+    # Наружу — только на loopback: локальные `runserver`/`celery` ходят на 127.0.0.1:6380.
+    ports:
+      - "127.0.0.1:6380:6379"
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -34,8 +40,10 @@ services:
       - backend_media:/app/media
     environment:
       - DB_HOST=db
+      - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     env_file:
       - ./backend/.env
     ports:
@@ -57,8 +65,10 @@ services:
       - backend_media:/app/media
     environment:
       - DB_HOST=db
+      - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     env_file:
       - ./backend/.env
     depends_on:

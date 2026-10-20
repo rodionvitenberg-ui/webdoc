@@ -65,46 +65,72 @@ upload (PDF/фото)
 ## Запуск (локально)
 
 ### Требования
-- Docker + Docker Compose
-- Либо локально: Python 3.13, Node 22, PostgreSQL 16, Redis 7, Tesseract OCR (`tesseract-ocr-rus` / `eng`)
+- Docker + Docker Compose (для PostgreSQL и Redis)
+- Python 3.13+ (проверено на 3.14), Node 22, Tesseract OCR (`tesseract-ocr-rus` / `eng`)
 
-### Быстрый старт через Docker
+### 1. Инфраструктура: PostgreSQL + Redis
 
 ```bash
-cp backend/.env.example backend/.env   # если .env.example есть; иначе создай backend/.env вручную
-docker compose up --build
+docker compose up -d db redis
 ```
 
-Сервисы:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000/api (Swagger: http://localhost:8000/api/docs)
-- Admin: http://localhost:8000/admin
+Порты на хосте (только loopback): PostgreSQL `127.0.0.1:5433`, Redis `127.0.0.1:6380`.
 
-### Backend (без Docker)
+Если Django пишет `connection to server at "127.0.0.1", port 5433 failed: Connection refused` —
+контейнеры не запущены: `docker compose up -d db redis`.
+
+`backend/.env` для запуска из терминала должен смотреть на них:
+
+```dotenv
+DB_HOST=127.0.0.1
+DB_PORT=5433
+CELERY_BROKER_URL=redis://127.0.0.1:6380/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6380/0
+```
+
+### 2. Backend (терминал)
 
 ```bash
 cd backend
-python -m venv venv && source venv/bin/activate
+python -m venv venv && source venv/bin/activate   # если venv ещё не создан
 pip install -r requirements.txt
 python manage.py migrate --noinput
-python manage.py createsuperuser --username admin --email admin@example.com --noinput
+python manage.py createsuperuser --email admin@example.com   # без --username: вход по email
 python manage.py runserver
 ```
 
-В отдельном терминале — Celery worker и broker:
+- Backend API: http://localhost:8000 (маршруты в корне, без `/api`)
+- Swagger: http://localhost:8000/docs
+- Admin: http://localhost:8000/admin
+
+### 3. Celery worker (отдельный терминал)
 
 ```bash
 cd backend && source venv/bin/activate
 celery -A config worker -l INFO
 ```
 
-### Frontend (без Docker)
+### 4. Frontend (отдельный терминал)
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
+http://localhost:3000 — адрес API берётся из `frontend/.env.local`
+(`NEXT_PUBLIC_API_URL=http://localhost:8000`, файл создаётся вручную).
+
+### Быстрый старт через Docker (всё сразу)
+
+```bash
+docker compose up --build
+```
+
+Сервисы:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000 (Swagger: http://localhost:8000/docs)
+- Admin: http://localhost:8000/admin
 
 ### Заполнить справочник характеристик (Traits)
 
@@ -126,7 +152,8 @@ python populated_traits.py
 | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Redis для Celery |
 | `CORS_ALLOWED_ORIGIN(S)` | разрешённые origins |
 | `AI_API_KEY`, `AI_API_KEY_2`, ... | ключи LLM (DeepSeek). Мультиключ: используются все с префиксом `AI_API_KEY`. |
-| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` | SMTP |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` | SMTP. Порт 465 → SSL, 587 → STARTTLS |
+| `FRONTEND_URL` | публичный URL фронта для ссылок в письмах (обязателен в проде) |
 | `CRYPTOMUS_MERCHANT_ID`, `CRYPTOMUS_API_KEY` | оплата PRO |
 | `NEXT_PUBLIC_API_URL` (frontend) | базовый URL backend API |
 

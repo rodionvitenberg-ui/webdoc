@@ -1,4 +1,3 @@
-import os
 import uuid
 import time
 from typing import List, Optional, Any
@@ -251,7 +250,7 @@ def reset_password_request(request, payload: ResetPasswordRequestSchema):
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     
-    domain = os.getenv("FRONTEND_URL", "https://webdoc.life").rstrip("/")
+    domain = settings.FRONTEND_URL
     reset_link = f"{domain}/auth/reset-password?uid={uid}&token={token}"
     
     try:

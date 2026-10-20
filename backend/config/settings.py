@@ -202,9 +202,10 @@ NINJA_JWT = {
 # Email Settings
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.getenv('EMAIL_HOST')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', 465))
-EMAIL_USE_SSL = True 
-EMAIL_USE_TLS = False
+# 465 = implicit SSL, 587 = STARTTLS: режим шифрования задаётся портом
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_SSL = EMAIL_PORT == 465
+EMAIL_USE_TLS = not EMAIL_USE_SSL
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
@@ -219,9 +220,14 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@bimark.org')
-
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Публичный URL фронта: ссылки в письмах (сброс пароля)
+FRONTEND_URL = (os.getenv('FRONTEND_URL') or ('http://localhost:3000' if DEBUG else '')).rstrip('/')
+if not FRONTEND_URL:
+    raise RuntimeError(
+        "FRONTEND_URL is required in production. Set it in backend/.env"
+    )
 
 # Sentry (опционально): включается только если задан SENTRY_DSN
 SENTRY_DSN = os.getenv('SENTRY_DSN')

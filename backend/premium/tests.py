@@ -108,3 +108,21 @@ class PaymentStatusEndpointTests(TestCase):
         result = payment_status(type("Request", (), {"user": self.user})())
         self.assertTrue(result["is_pro"])
         self.assertIsNotNone(result["pro_expires_at"])
+
+
+class ChatAssistantNullSafetyTests(TestCase):
+    def test_chat_prompt_falls_back_to_default(self):
+        from premium.services import ChatAssistant
+
+        with patch("premium.services.PromptTemplate.objects") as mock_objects:
+            mock_objects.filter.return_value.first.return_value = None
+            prompt = ChatAssistant(language_code="en")._get_prompt()
+
+        self.assertIn("WebDoc.life", prompt)
+
+    def test_minify_handles_legacy_null_payload(self):
+        from premium.services import ChatAssistant
+
+        result = ChatAssistant()._minify_analysis({"summary": None, "indicators": None})
+
+        self.assertEqual(result, {"summary": {"is_critical": False}, "indicators": []})

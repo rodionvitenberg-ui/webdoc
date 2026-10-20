@@ -95,5 +95,16 @@ class LLMClient:
 
 
 def json_loads(text: str) -> dict:
+    """Парсит JSON-объект, снимая markdown-обёртки. Корень-не-объект — ошибка."""
     import json
-    return json.loads(text)
+
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").strip()
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+
+    data = json.loads(cleaned)
+    if not isinstance(data, dict):
+        raise ValueError("LLM must return a JSON object")
+    return data
