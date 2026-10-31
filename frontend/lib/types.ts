@@ -6,6 +6,7 @@ export interface AuthResponse {
     user_email: string;
     is_pro: boolean;
     pro_expires_at?: string | null;
+    warning?: string | null;
 }
 
 export interface PatientMetadata {

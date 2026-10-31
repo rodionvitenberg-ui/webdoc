@@ -1,8 +1,10 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
 
+from .mail import send_html_email
 from .models import AnalysisIndicator, MedicalAnalysis, PatientProfile, User
 from .services import (
     FREE_DAILY_LIMIT,
@@ -210,3 +212,55 @@ class DailyLimitTests(TestCase):
             user=self.user, status=MedicalAnalysis.Status.PENDING
         )
         self.assertEqual(count_todays_launches(self.user), 2)
+
+
+class SendHtmlEmailTests(TestCase):
+    """Сбой SMTP не глотается молча: ошибка логируется с traceback, возвращается False."""
+
+    @patch("core.mail.EmailMultiAlternatives")
+    def test_smtp_failure_returns_false_and_logs(self, mock_email_cls):
+        import smtplib
+
+        mock_email_cls.return_value.send.side_effect = smtplib.SMTPException("boom")
+
+        with self.assertLogs("core.mail", level="ERROR") as logs:
+            sent = send_html_email("Тема", "текст", "<p>html</p>", ["to@example.com"])
+
+        self.assertFalse(sent)
+        self.assertTrue(any("boom" in line for line in logs.output))
+
+    @patch("core.mail.EmailMultiAlternatives")
+    def test_success_returns_true(self, mock_email_cls):
+        mock_email_cls.return_value.send.return_value = 1
+
+        sent = send_html_email("Тема", "текст", "<p>html</p>", ["to@example.com"])
+
+        self.assertTrue(sent)
+
+
+class RegisterEmailFailureTests(TestCase):
+    """Регистрация без пароля: сбой письма не валит регистрацию и виден в ответе."""
+
+    @patch("core.api.send_html_email", return_value=False)
+    def test_register_reports_email_failure_in_warning(self, mocked_send):
+        response = self.client.post(
+            "/auth/register",
+            {"email": "newuser@example.com"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("token", data)
+        self.assertTrue(data["warning"])
+
+    @patch("core.api.send_html_email", return_value=True)
+    def test_register_success_has_no_warning(self, mocked_send):
+        response = self.client.post(
+            "/auth/register",
+            {"email": "newuser2@example.com"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["warning"])

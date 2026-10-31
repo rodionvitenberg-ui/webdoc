@@ -1,3 +1,4 @@
+import logging
 import uuid
 import time
 from typing import List, Optional, Any
@@ -72,6 +73,7 @@ class ChangePasswordSchema(Schema):
 
 api = NinjaAPI()
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 class OptionalJWTAuth(JWTAuth):
     """
@@ -96,6 +98,7 @@ def register(request, payload: RegisterSchema):
     if User.objects.filter(email=payload.email).exists():
         return api.create_response(request, {"message": _("Пользователь с таким email уже существует")}, status=400)
     
+    email_warning = None
     with transaction.atomic():
         user = User.objects.create(email=payload.email, phone=payload.phone)
         password = payload.password or get_random_string(6, allowed_chars='0123456789')
@@ -110,21 +113,25 @@ def register(request, payload: RegisterSchema):
                 # Оставляем текстовое сообщение как fallback (для старых почтовиков)
                 mail_subject = _("Регистрация в WebDoc.life")
                 mail_message = _("Добро пожаловать в WebDoc.life!\n\nВаши данные для входа:\nЛогин: {email}\nВаш пароль: {password}\n\nПожалуйста, сохраните эти данные или смените пароль в личном кабинете.").format(email=user.email, password=password)
-                
+
                 # Рендерим HTML
                 html_message = render_to_string('emails/register_email.html', {
                     'email': user.email,
                     'password': password
                 })
-                
-                send_html_email(
+
+                sent = send_html_email(
                     subject=mail_subject,
                     text_body=mail_message,
                     html_body=html_message,
                     to=[user.email],
                 )
-            except Exception as e:
-                print(f"❌ Ошибка отправки письма при регистрации: {e}")
+            except Exception:
+                # Сбой не валит регистрацию, но обязан быть виден в логах с traceback.
+                logger.exception("Ошибка отправки письма при регистрации")
+                sent = False
+            if not sent:
+                email_warning = _("Не удалось отправить письмо с паролем. Обратитесь в поддержку.")
 
     refresh = RefreshToken.for_user(user)
     return {
@@ -133,6 +140,7 @@ def register(request, payload: RegisterSchema):
         "user_email": user.email,
         "is_pro": user.is_pro,
         "pro_expires_at": user.pro_expires_at.isoformat() if user.pro_expires_at else None,
+        "warning": email_warning,
     }
 
 @api.post("/auth/login", response=AuthResponseSchema)
@@ -181,8 +189,8 @@ def claim_request(request, payload: ClaimRequestOTPSchema):
                     html_body=html_message,
                     to=[user.email],
                 )
-            except Exception as e:
-                print(f"❌ Ошибка отправки письма: {e}")
+            except Exception:
+                logger.exception("Ошибка отправки письма при claim-request")
 
             return {"message": _("PIN-код отправлен на почту"), "status": "pin_sent"}
         else:
@@ -268,8 +276,8 @@ def reset_password_request(request, payload: ResetPasswordRequestSchema):
             html_body=html_message,
             to=[user.email],
         )
-    except Exception as e:
-        print(f"❌ Ошибка отправки письма при сбросе: {e}")
+    except Exception:
+        logger.exception("Ошибка отправки письма при сбросе пароля")
 
 @api.post("/auth/reset-password-confirm")
 def reset_password_confirm(request, payload: ResetPasswordConfirmSchema):

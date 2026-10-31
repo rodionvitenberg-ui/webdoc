@@ -1,9 +1,12 @@
 """Отправка писем с inline-логотипом (не удалёнными картинками, которые блокируют почтовики)."""
+import logging
 import os
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from email.mime.image import MIMEImage
+
+logger = logging.getLogger(__name__)
 
 
 def attach_logo(message: EmailMultiAlternatives) -> None:
@@ -24,8 +27,11 @@ def attach_logo(message: EmailMultiAlternatives) -> None:
     message.attach(part)
 
 
-def send_html_email(subject: str, text_body: str, html_body: str, to: list[str]) -> None:
-    """Письмо с html_body и text_body, логотип встроен как cid:logo.png."""
+def send_html_email(subject: str, text_body: str, html_body: str, to: list[str]) -> bool:
+    """Письмо с html_body и text_body, логотип встроен как cid:logo.png.
+
+    Возвращает True при успешной отправке, False при сбое (сбой логируется с traceback).
+    """
     message = EmailMultiAlternatives(
         subject=subject,
         body=text_body,
@@ -36,9 +42,11 @@ def send_html_email(subject: str, text_body: str, html_body: str, to: list[str])
     message.attach_alternative(html_body, 'text/html')
     try:
         message.send(fail_silently=False)
-    except Exception as e:
+        return True
+    except Exception:
         # Не прячем ошибку SMTP: иначе «письмо не дошло» без единого следа в логах.
-        print(f"❌ Ошибка отправки письма '{subject}' → {to}: {type(e).__name__}: {e}")
+        logger.exception("Ошибка отправки письма '%s' → %s", subject, to)
+        return False
 
 
 def demo() -> None:
