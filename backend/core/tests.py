@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from celery.exceptions import Retry
+from django.core.files.base import ContentFile
 from django.test import TestCase
 from django.utils import timezone
 
@@ -14,6 +16,7 @@ from .services import (
     get_daily_analysis_limit,
     save_atomic_indicators,
 )
+from .tasks import process_analysis_task
 
 
 class AnalysisAccessTests(TestCase):
@@ -264,3 +267,49 @@ class RegisterEmailFailureTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["warning"])
+
+
+class ProcessAnalysisTaskRetryTests(TestCase):
+    """Исчерпание ретраев process_analysis_task обязано переводить анализ в FAILED.
+
+    Celery при исчерпании max_retries с переданным exc= перевыбрасывает
+    ИСХОДНОЕ исключение, а не MaxRetriesExceededError: прежний обработчик
+    не срабатывал, статус FAILED не выставлялся, и документ навсегда
+    оставался в processing («вечный анализ»).
+    """
+
+    def setUp(self):
+        self.analysis = MedicalAnalysis.objects.create(
+            status=MedicalAnalysis.Status.PROCESSING,
+        )
+        self.analysis.file.save('test.jpeg', ContentFile(b'fake'), save=True)
+        self.addCleanup(self.analysis.file.delete, save=False)
+
+    def _run_task_with_failing_pipeline(self, retries: int):
+        """Прогоняет таску с падающим пайплайном при заданном числе ретраев."""
+        with patch('analysis.document_processor.document_to_images', return_value=['img']), \
+             patch('core.tasks.AnalysisPipeline') as pipeline_cls:
+            pipeline_cls.return_value.run_pipeline.side_effect = RuntimeError('LLM недоступен')
+            process_analysis_task.push_request(retries=retries)
+            try:
+                return process_analysis_task.run(str(self.analysis.uid))
+            finally:
+                process_analysis_task.pop_request()
+
+    def test_exhausted_retries_mark_analysis_failed(self):
+        outcome = self._run_task_with_failing_pipeline(retries=5)
+
+        self.assertFalse(outcome)
+        self.analysis.refresh_from_db()
+        self.assertEqual(self.analysis.status, MedicalAnalysis.Status.FAILED)
+
+    def test_before_exhaustion_schedules_retry_and_keeps_processing(self):
+        with patch('celery.app.task.Task.retry', side_effect=Retry('retry', None)) as mock_retry:
+            with self.assertRaises(Retry):
+                self._run_task_with_failing_pipeline(retries=0)
+
+        mock_retry.assert_called_once()
+        self.assertEqual(mock_retry.call_args.kwargs['countdown'], 5)
+        self.assertIsInstance(mock_retry.call_args.kwargs['exc'], RuntimeError)
+        self.analysis.refresh_from_db()
+        self.assertEqual(self.analysis.status, MedicalAnalysis.Status.PROCESSING)

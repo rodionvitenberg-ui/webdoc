@@ -170,11 +170,11 @@ def process_analysis_task(self, analysis_id, language_code='en'):
 
     except Exception as exc:
         print(f"❌ Error in Task: {exc}")
-        countdown = 5 * (2 ** self.request.retries)
-        try:
-            print(f"⚠️ Retrying in {countdown}s... (Attempt {self.request.retries + 1}/5)")
-            raise self.retry(exc=exc, countdown=countdown)
-        except self.MaxRetriesExceededError:
+        # Celery при исчерпании max_retries, когда в retry() передан exc=,
+        # перевыбрасывает ИСХОДНОЕ исключение, а не MaxRetriesExceededError.
+        # Прежний except никогда не срабатывал, статус FAILED не выставлялся,
+        # и документ навсегда оставался в processing («вечный анализ»).
+        if self.request.retries >= self.max_retries:
             print("❌ Max retries exceeded.")
             try:
                 # Обернуто в try/except на случай, если запись удалена
@@ -185,6 +185,9 @@ def process_analysis_task(self, analysis_id, language_code='en'):
             except MedicalAnalysis.DoesNotExist:
                 pass
             return False
-            
+        countdown = 5 * (2 ** self.request.retries)
+        print(f"⚠️ Retrying in {countdown}s... (Attempt {self.request.retries + 1}/{self.max_retries})")
+        raise self.retry(exc=exc, countdown=countdown)
+
     finally:
         translation.deactivate()
