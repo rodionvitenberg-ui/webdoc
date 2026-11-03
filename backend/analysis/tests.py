@@ -1,3 +1,4 @@
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -7,8 +8,13 @@ from django.test import TestCase
 from analysis.document_processor import MAX_PAGES, document_to_images
 from analysis.models import PromptTemplate
 from analysis.prompts import DEFAULT_PROMPTS, MIN_PROMPT_LENGTH
-from analysis.services import AnalysisPipeline, normalize_ai_result
-from core.llm import LLMClient, json_loads
+from analysis.services import (
+    AnalysisPipeline,
+    ExtractionError,
+    normalize_ai_result,
+    normalize_extraction,
+)
+from core.llm import DEFAULT_MAX_TOKENS, LLMClient, json_loads
 
 # Содержимое картинки тестам не нужно: LLM замокан, важен только факт передачи.
 IMAGE_DATA_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
@@ -189,6 +195,51 @@ class PipelineResultTests(TestCase):
             AnalysisPipeline(language_code="ru").run_pipeline([IMAGE_DATA_URL])
 
 
+class ExtractionNormalizationTests(TestCase):
+    """normalize_extraction: непригодный ответ модели — ExtractionError (без ретраев)."""
+
+    def test_non_dict_raises_extraction_error(self):
+        with self.assertRaises(ExtractionError):
+            normalize_extraction("not a dict")
+
+    def test_non_list_indicators_raise_extraction_error(self):
+        with self.assertRaises(ExtractionError):
+            normalize_extraction({"patient_info": {}, "indicators": "nope"})
+
+    def test_empty_indicators_raise_extraction_error(self):
+        with self.assertRaises(ExtractionError):
+            normalize_extraction({"patient_info": {}, "indicators": []})
+
+    def test_items_without_name_or_value_are_skipped(self):
+        with self.assertRaises(ExtractionError):
+            normalize_extraction({"indicators": [{"name": "Hb"}, {"value": "140"}]})
+
+    def test_error_is_value_error_for_legacy_handlers(self):
+        # ExtractionError наследует ValueError: старые обработчики не ломаются.
+        with self.assertRaises(ValueError) as ctx:
+            normalize_extraction({"indicators": []})
+        self.assertIsInstance(ctx.exception, ExtractionError)
+
+    def test_valid_extraction_is_normalized(self):
+        result = normalize_extraction({
+            "patient_info": {
+                "extracted_name": "Иванов И.И.",
+                "extracted_gender": "male",
+                "extracted_birth_date": "1990-01-01",
+                "extracted_date": "2026-11-03",
+            },
+            "indicators": [
+                {"name": "Гемоглобин", "value": "140", "unit": "г/л", "ref_range": "135 - 169"},
+                {"name": "", "value": ""},
+            ],
+        })
+
+        self.assertEqual(len(result["indicators"]), 1)
+        self.assertEqual(result["indicators"][0]["name"], "Гемоглобин")
+        self.assertEqual(result["indicators"][0]["ref_range"], "135 - 169")
+        self.assertEqual(result["patient_info"]["extracted_gender"], "MALE")
+
+
 class JsonParsingTests(TestCase):
     def test_strips_markdown_fence(self):
         self.assertEqual(json_loads('```json\n{"status": "ok"}\n```'), {"status": "ok"})
@@ -258,3 +309,39 @@ class LLMImagePayloadTests(TestCase):
         messages = self._call()
 
         self.assertEqual(messages[1], {"role": "user", "content": "user text"})
+
+
+class LLMMaxTokensTests(TestCase):
+    """max_tokens должен явно уходить в API: reasoning-модель иначе упирается в дефолт."""
+
+    def _create_kwargs(self, env_value=None, explicit=None):
+        client = LLMClient()
+        client._keys = ["test-key"]
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
+        )
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=MagicMock(return_value=response)))
+        )
+        environ = {"LLM_MAX_TOKENS": env_value} if env_value is not None else {}
+        with patch.object(LLMClient, "_get_client", return_value=fake_client):
+            with patch.dict(os.environ, environ, clear=True):
+                client.complete("sys", "user text", require_json=True, max_tokens=explicit)
+
+        return fake_client.chat.completions.create.call_args.kwargs
+
+    def test_explicit_argument_wins(self):
+        kwargs = self._create_kwargs(env_value="123", explicit=456)
+        self.assertEqual(kwargs["max_tokens"], 456)
+
+    def test_env_override_applied(self):
+        kwargs = self._create_kwargs(env_value="12000")
+        self.assertEqual(kwargs["max_tokens"], 12000)
+
+    def test_default_when_unconfigured(self):
+        kwargs = self._create_kwargs(env_value=None)
+        self.assertEqual(kwargs["max_tokens"], DEFAULT_MAX_TOKENS)
+
+    def test_garbage_env_falls_back_to_default(self):
+        kwargs = self._create_kwargs(env_value="garbage")
+        self.assertEqual(kwargs["max_tokens"], DEFAULT_MAX_TOKENS)

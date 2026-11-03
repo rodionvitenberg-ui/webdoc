@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 
 from core.llm import LLMClient
 from .models import PromptTemplate
 from .prompts import DEFAULT_PROMPTS, MIN_PROMPT_LENGTH, RESULT_FALLBACKS, resolve_language
+
+logger = logging.getLogger(__name__)
 
 VALID_STATUSES = {"normal", "low", "high", "critical"}
 VALID_SEVERITIES = {"green", "yellow", "red"}
@@ -42,10 +45,42 @@ def _slug(value, fallback: str) -> str:
     return text or fallback
 
 
-def normalize_extraction(raw_data) -> dict:
-    """Валидирует ответ экстрактора. Бросает ValueError вместо сохранения null-результата."""
+class ExtractionError(ValueError):
+    """Детерминированная ошибка экстракции: ответ модели непригоден.
+
+    Наследует ValueError для совместимости с существующими обработчиками.
+    Ретраить бессмысленно — тот же промпт и temperature дадут тот же ответ,
+    поэтому задача должна падать сразу, без холостых повторов.
+    """
+
+
+def _log_extraction_shape(raw_data) -> None:
+    """Логирует СТРУКТУРУ сырого ответа экстрактора без значений (PII/PHI не пишем)."""
     if not isinstance(raw_data, dict):
-        raise ValueError("Экстрактор вернул не JSON-объект")
+        logger.warning("Extractor returned non-dict: %s", type(raw_data).__name__)
+        return
+    indicators = raw_data.get("indicators")
+    if isinstance(indicators, list):
+        shapes = [
+            sorted(item) if isinstance(item, dict) else type(item).__name__
+            for item in indicators[:5]
+        ]
+    else:
+        shapes = type(indicators).__name__
+    patient_info = raw_data.get("patient_info")
+    logger.warning(
+        "Extractor response unusable: top_keys=%s indicators=%s patient_info=%s",
+        sorted(raw_data),
+        shapes,
+        sorted(patient_info) if isinstance(patient_info, dict) else type(patient_info).__name__,
+    )
+
+
+def normalize_extraction(raw_data) -> dict:
+    """Валидирует ответ экстрактора. Бросает ExtractionError (наследник ValueError)."""
+    if not isinstance(raw_data, dict):
+        _log_extraction_shape(raw_data)
+        raise ExtractionError("Экстрактор вернул не JSON-объект")
 
     patient_info = raw_data.get("patient_info")
     if not isinstance(patient_info, dict):
@@ -53,7 +88,8 @@ def normalize_extraction(raw_data) -> dict:
 
     indicators = raw_data.get("indicators")
     if not isinstance(indicators, list):
-        raise ValueError("Экстрактор не вернул массив indicators")
+        _log_extraction_shape(raw_data)
+        raise ExtractionError("Экстрактор не вернул массив indicators")
 
     clean_indicators = []
     for item in indicators:
@@ -71,7 +107,8 @@ def normalize_extraction(raw_data) -> dict:
         })
 
     if not clean_indicators:
-        raise ValueError("Экстрактор не извлёк ни одного показателя с названием и значением")
+        _log_extraction_shape(raw_data)
+        raise ExtractionError("Экстрактор не извлёк ни одного показателя с названием и значением")
 
     gender = _as_text(patient_info.get("extracted_gender")).upper()
     if gender not in {"MALE", "FEMALE"}:

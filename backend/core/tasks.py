@@ -3,7 +3,7 @@ from celery import shared_task
 from django.utils import timezone
 from django.utils import translation
 from .models import MedicalAnalysis, AnalysisIndicator, PatientProfile
-from analysis.services import AnalysisPipeline
+from analysis.services import AnalysisPipeline, ExtractionError
 from core.services import save_atomic_indicators
 
 # ----------------------------------------------
@@ -153,6 +153,20 @@ def process_analysis_task(self, analysis_id, language_code='en'):
             
             trigger_next_analysis(analysis, language_code)
             return False
+
+    except ExtractionError as exc:
+        # Детерминированная ошибка экстракции (на документе нет показателей или
+        # ответ модели непригоден): ретрай с тем же промптом и temperature=0.1
+        # даст тот же результат, поэтому падаем сразу.
+        print(f"❌ Extraction failed without retry: {exc}")
+        try:
+            analysis.refresh_from_db()
+            analysis.status = MedicalAnalysis.Status.FAILED
+            analysis.save(update_fields=['status'])
+            trigger_next_analysis(analysis, language_code)
+        except MedicalAnalysis.DoesNotExist:
+            pass
+        return False
 
     except Exception as exc:
         print(f"❌ Error in Task: {exc}")

@@ -10,6 +10,21 @@ import time
 
 from openai import OpenAI
 
+# Проверено на prod-модели deepseek-flash (reasoning): 8000 выходных токенов
+# принимаются API и покрывают транскрипцию одной страницы бланка с запасом.
+DEFAULT_MAX_TOKENS = 8000
+
+
+def _resolve_max_tokens(max_tokens: int | None) -> int:
+    """Явный аргумент вызова > LLM_MAX_TOKENS из окружения > DEFAULT_MAX_TOKENS."""
+    if max_tokens:
+        return max_tokens
+    raw = os.environ.get("LLM_MAX_TOKENS", "")
+    try:
+        return int(raw) if raw else DEFAULT_MAX_TOKENS
+    except ValueError:
+        return DEFAULT_MAX_TOKENS
+
 
 class LLMClient:
     def __init__(self, base_url: str = "https://api.deepseek.com", model_name: str = "deepseek-chat"):
@@ -37,12 +52,18 @@ class LLMClient:
 
     def complete(self, sys_prompt: str, user_prompt: str, require_json: bool = False,
                  temperature: float = 0.1, max_attempts: int | None = None,
-                 images: list[str] | None = None) -> str | dict:
+                 images: list[str] | None = None,
+                 max_tokens: int | None = None) -> str | dict:
         """
         Синхронный вызов без стрима. Возвращает текст или dict (require_json=True).
 
         images — data-URL картинок; уходят в user-сообщение (в system/assistant
         vision-модель их не принимает).
+
+        max_tokens — верхняя граница выхода (рассуждения + ответ). deepseek-flash —
+        reasoning-модель: без явного лимита бюджет может исчерпаться на
+        рассуждениях, и ответ придёт пустым. По умолчанию — LLM_MAX_TOKENS
+        из окружения или DEFAULT_MAX_TOKENS.
         """
         if not self._keys:
             raise RuntimeError("AI_API_KEY не найдены в окружении")
@@ -64,6 +85,7 @@ class LLMClient:
                         {"role": "user", "content": user_content},
                     ],
                     "temperature": temperature,
+                    "max_tokens": _resolve_max_tokens(max_tokens),
                 }
                 if require_json:
                     kwargs["response_format"] = {"type": "json_object"}
