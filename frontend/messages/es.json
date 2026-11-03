@@ -312,6 +312,11 @@
         "Generando conclusiones y recomendaciones..."
       ]
     },
+    "Failed": {
+      "title": "No se pudo completar el análisis",
+      "text": "No pudimos reconocer indicadores médicos en el documento. Prueba con una foto más nítida o un PDF del informe; la imagen debe ser clara y legible.",
+      "cta": "Subir un documento"
+    },
     "Indicators": {
       "title": "Indicadores por sistema",
       "count": "{count} valores",

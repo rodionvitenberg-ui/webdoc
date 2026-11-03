@@ -20,6 +20,7 @@ import { API_BASE_URL } from '@/lib/api';
 
 // Импорты наших новых модулей
 import { AnalysisLoading } from '@/components/analysis/AnalysisLoading';
+import { AnalysisFailed } from '@/components/analysis/AnalysisFailed';
 import { AnalysisHeader } from '@/components/analysis/AnalysisHeader';
 import { IndicatorsTable } from '@/components/analysis/IndicatorsTable';
 import { CausesAndRecommendations } from '@/components/analysis/CausesAndRecommendations';
@@ -130,6 +131,16 @@ export default function AnalysisPage() {
       setIsViewingOriginal(false);
     }
   };
+
+  // Упавший анализ показываем отдельным экраном, а не вечной загрузкой
+  if (data && data.status === 'failed') {
+    return (
+      <main className="relative min-h-screen flex flex-col items-center justify-center pt-20 px-4">
+        <StaticBackground imageUrl="/background/analisis.png" />
+        <AnalysisFailed />
+      </main>
+    );
+  }
 
   if (!data || data.status !== 'completed') {
     return (

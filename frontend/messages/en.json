@@ -310,6 +310,11 @@
         "Generating insights and recommendations..."
       ]
     },
+    "Failed": {
+      "title": "Analysis could not be completed",
+      "text": "We could not recognize any medical indicators in the document. Please try a sharper photo or a PDF of the report — the snapshot must be clear and legible.",
+      "cta": "Upload a document"
+    },
     "Indicators": {
       "title": "Indicators by System",
       "count": "{count} values",
